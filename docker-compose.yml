@@ -57,7 +57,7 @@ services:
     ports:
       - "80:80"
     volumes:
-      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf
     depends_on:
       - app
     restart: unless-stopped
@@ -66,7 +66,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: npx prisma migrate deploy
+    command: node_modules/.bin/prisma db push
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     depends_on:
