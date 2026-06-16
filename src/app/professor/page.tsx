@@ -17,24 +17,47 @@ import {
   verticalListSortingStrategy,
   arrayMove,
 } from '@dnd-kit/sortable';
-import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
-import QuestionCard from '@/components/lab-report/QuestionCard';
-import { LabFormValues, QuestionDraft, QuestionType } from '@/types';
+import { restrictToVerticalAxis, restrictToWindowEdges } from '@dnd-kit/modifiers';
+import FullPageForm, {
+  type FullPageFormSection,
+} from '@/components/general/forms/FullPageForm';
+import type { QuestionDraft } from '@/types';
 
-function generateId() {
+function uid() {
   return Math.random().toString(36).slice(2, 10);
 }
 
-const emptyValues: LabFormValues = {
-  title: '',
-  professorName: '',
-  className: '',
-  questions: [],
+function emptyQuestion(order: number): QuestionDraft {
+  return { id: uid(), text: '', type: 'TEXT', order };
+}
+
+type ProfessorFormValues = {
+  title: string;
+  professorName: string;
+  className: string;
 };
+
+function GripIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor">
+      <circle cx="6" cy="5" r="1.3" />
+      <circle cx="6" cy="9" r="1.3" />
+      <circle cx="6" cy="13" r="1.3" />
+      <circle cx="12" cy="5" r="1.3" />
+      <circle cx="12" cy="9" r="1.3" />
+      <circle cx="12" cy="13" r="1.3" />
+    </svg>
+  );
+}
 
 export default function ProfessorPage() {
   const router = useRouter();
-  const [values, setValues] = useState<LabFormValues>(emptyValues);
+  const [values, setValues] = useState<ProfessorFormValues>({
+    title: '',
+    professorName: '',
+    className: '',
+  });
+  const [questions, setQuestions] = useState<QuestionDraft[]>([emptyQuestion(0)]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
 
@@ -43,48 +66,13 @@ export default function ProfessorPage() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  const setField = useCallback(
-    (field: keyof Omit<LabFormValues, 'questions'>, value: string) => {
-      setValues((v) => ({ ...v, [field]: value }));
-      setErrors((e) => ({ ...e, [field]: '' }));
-    },
-    [],
-  );
-
-  const addQuestion = useCallback(() => {
-    const q: QuestionDraft = {
-      id: generateId(),
-      text: '',
-      type: 'TEXT',
-      order: values.questions.length,
-    };
-    setValues((v) => ({ ...v, questions: [...v.questions, q] }));
-  }, [values.questions.length]);
-
-  const updateQuestion = useCallback(
-    (id: string, field: keyof QuestionDraft, value: string | QuestionType) => {
-      setValues((v) => ({
-        ...v,
-        questions: v.questions.map((q) => (q.id === id ? { ...q, [field]: value } : q)),
-      }));
-    },
-    [],
-  );
-
-  const deleteQuestion = useCallback((id: string) => {
-    setValues((v) => ({
-      ...v,
-      questions: v.questions.filter((q) => q.id !== id),
-    }));
-  }, []);
-
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     const { active, over } = event;
     if (over && active.id !== over.id) {
-      setValues((v) => {
-        const oldIndex = v.questions.findIndex((q) => q.id === active.id);
-        const newIndex = v.questions.findIndex((q) => q.id === over.id);
-        return { ...v, questions: arrayMove(v.questions, oldIndex, newIndex) };
+      setQuestions((qs) => {
+        const from = qs.findIndex((q) => q.id === active.id);
+        const to = qs.findIndex((q) => q.id === over.id);
+        return arrayMove(qs, from, to);
       });
     }
   }, []);
@@ -94,9 +82,8 @@ export default function ProfessorPage() {
     if (!values.title.trim()) errs.title = 'Lab title is required';
     if (!values.professorName.trim()) errs.professorName = 'Professor name is required';
     if (!values.className.trim()) errs.className = 'Class is required';
-    if (values.questions.length === 0) errs.questions = 'Add at least one question';
-    values.questions.forEach((q, i) => {
-      if (!q.text.trim()) errs[`q_${q.id}`] = `Question ${i + 1} needs text`;
+    questions.forEach((q, i) => {
+      if (!q.text.trim()) errs[`questions.${i}.text`] = 'Question text is required';
     });
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -110,166 +97,131 @@ export default function ProfessorPage() {
       const res = await fetch('/api/labs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(values),
+        body: JSON.stringify({ ...values, questions }),
       });
-      if (!res.ok) throw new Error('Failed to save lab');
+      if (!res.ok) throw new Error();
       const lab = await res.json();
       router.push(`/student/lab/${lab.id}`);
-    } catch (err) {
-      console.error(err);
-      setErrors({ submit: 'Something went wrong. Please try again.' });
+    } catch {
+      setErrors((e) => ({ ...e, submit: 'Something went wrong. Please try again.' }));
     } finally {
       setSubmitting(false);
     }
   };
 
-  return (
-    <main className="min-h-screen bg-gray-50 py-12">
-      <div className="mx-auto max-w-2xl px-4">
-        <header className="mb-8">
-          <p className="text-sm font-medium uppercase tracking-widest text-gray-400">
-            Professor setup
-          </p>
-          <h1 className="mt-1 text-3xl font-semibold text-gray-900">Create a lab report</h1>
-        </header>
-
-        <form onSubmit={handleSubmit} noValidate>
-          {/* Lab details */}
-          <section className="mb-8 space-y-4 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h2 className="text-base font-semibold text-gray-700">Lab details</h2>
-
-            <Field
-              label="Lab title"
-              error={errors.title}
-              input={
-                <input
-                  type="text"
-                  value={values.title}
-                  onChange={(e) => setField('title', e.target.value)}
-                  placeholder="e.g. Enzyme Kinetics Lab"
-                  className={inputClass(!!errors.title)}
-                />
-              }
-            />
-            <div className="grid grid-cols-2 gap-4">
-              <Field
-                label="Professor name"
-                error={errors.professorName}
-                input={
-                  <input
-                    type="text"
-                    value={values.professorName}
-                    onChange={(e) => setField('professorName', e.target.value)}
-                    placeholder="Dr. Smith"
-                    className={inputClass(!!errors.professorName)}
-                  />
-                }
-              />
-              <Field
-                label="Class"
-                error={errors.className}
-                input={
-                  <input
-                    type="text"
-                    value={values.className}
-                    onChange={(e) => setField('className', e.target.value)}
-                    placeholder="CHEM 3450"
-                    className={inputClass(!!errors.className)}
-                  />
-                }
-              />
-            </div>
-          </section>
-
-          {/* Questions */}
-          <section className="mb-8">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-700">Questions</h2>
-              {errors.questions && (
-                <p className="text-xs text-red-500">{errors.questions}</p>
-              )}
-            </div>
-
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              modifiers={[restrictToVerticalAxis]}
-              onDragEnd={handleDragEnd}
-            >
-              <SortableContext
-                items={values.questions.map((q) => q.id)}
-                strategy={verticalListSortingStrategy}
+  const sections: FullPageFormSection<ProfessorFormValues, QuestionDraft>[] = [
+    {
+      kind: 'section',
+      key: 'lab-details',
+      title: 'Lab details',
+      description: "This information will appear at the top of every student's report.",
+      fields: [
+        {
+          kind: 'input',
+          key: 'title',
+          label: 'Lab title',
+          placeholder: 'e.g. Enzyme Kinetics Lab',
+          required: true,
+          colSpan: 2,
+        },
+        {
+          kind: 'input',
+          key: 'professorName',
+          label: 'Professor name',
+          placeholder: 'Dr. Smith',
+          required: true,
+        },
+        {
+          kind: 'input',
+          key: 'className',
+          label: 'Class',
+          placeholder: 'CHEM 3450',
+          required: true,
+        },
+      ],
+    },
+    {
+      kind: 'repeater',
+      key: 'questions',
+      title: 'Questions',
+      description: 'Add each question students will answer. Drag to reorder.',
+      addButtonLabel: 'Add question',
+      emptyMessage: 'No questions yet — add one below.',
+      items: questions,
+      onAdd: () => setQuestions((qs) => [...qs, emptyQuestion(qs.length)]),
+      onRemove: (i) => setQuestions((qs) => qs.filter((_, idx) => idx !== i)),
+      getItemValue: (item, key) => (item as any)[key],
+      setItemValue: (index, key, value) =>
+        setQuestions((qs) =>
+          qs.map((q, i) => (i === index ? { ...q, [key]: value } : q)),
+        ),
+      fields: [
+        {
+          kind: 'input',
+          key: 'text',
+          label: 'Question text',
+          placeholder: 'e.g. Describe the reaction you observed…',
+          required: true,
+          colSpan: 2,
+        },
+        {
+          kind: 'radio',
+          key: 'type',
+          label: 'Response format',
+          options: [
+            { label: 'Text answer', value: 'TEXT' },
+            { label: 'Image upload', value: 'IMAGE' },
+          ],
+        },
+        {
+          kind: 'custom',
+          key: 'drag-handle',
+          colSpan: 1,
+          render: () => (
+            <div className="flex items-end justify-end pb-1">
+              <span
+                className="cursor-grab touch-none text-gray-300 hover:text-gray-500"
+                title="Drag to reorder"
               >
-                <div className="space-y-3">
-                  {values.questions.map((q, i) => (
-                    <div key={q.id}>
-                      <QuestionCard
-                        question={q}
-                        index={i}
-                        onChange={updateQuestion}
-                        onDelete={deleteQuestion}
-                      />
-                      {errors[`q_${q.id}`] && (
-                        <p className="mt-1 pl-10 text-xs text-red-500">
-                          {errors[`q_${q.id}`]}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </SortableContext>
-            </DndContext>
+                <GripIcon />
+              </span>
+            </div>
+          ),
+        },
+      ],
+    },
+  ];
 
-            <button
-              type="button"
-              onClick={addQuestion}
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 py-3 text-sm text-gray-500 transition-colors hover:border-gray-400 hover:bg-white hover:text-gray-700"
-            >
-              <span className="text-lg leading-none">+</span> Add question
-            </button>
-          </section>
-
-          {errors.submit && (
-            <p className="mb-4 rounded-lg bg-red-50 px-4 py-2 text-sm text-red-600">
-              {errors.submit}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full rounded-xl bg-gray-900 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-          >
-            {submitting ? 'Saving…' : 'Save lab & share with students →'}
-          </button>
-        </form>
-      </div>
-    </main>
-  );
-}
-
-function Field({
-  label,
-  error,
-  input,
-}: {
-  label: string;
-  error?: string;
-  input: React.ReactNode;
-}) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <label className="text-sm font-medium text-gray-600">{label}</label>
-      {input}
-      {error && <p className="text-xs text-red-500">{error}</p>}
+    <div className="min-h-screen bg-gray-100 py-10">
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        modifiers={[restrictToVerticalAxis, restrictToWindowEdges]}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext
+          items={questions.map((q) => q.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          <FullPageForm
+            title="Create a lab report"
+            intro="Set up the lab details and questions. Students will receive a link to fill in their answers."
+            values={values}
+            setValues={setValues}
+            sections={sections}
+            errors={errors}
+            onSubmit={handleSubmit}
+            submitLabel="Save lab & share with students"
+            submitting={submitting}
+            maxWidthClass="max-w-2xl"
+          />
+        </SortableContext>
+      </DndContext>
+
+      {errors.submit && (
+        <p className="mx-auto mt-2 max-w-2xl px-6 text-sm text-red-500">{errors.submit}</p>
+      )}
     </div>
   );
-}
-
-function inputClass(hasError: boolean) {
-  return `w-full rounded-lg border px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-offset-1 ${
-    hasError
-      ? 'border-red-300 focus:ring-red-200'
-      : 'border-gray-200 focus:border-gray-400 focus:ring-gray-100'
-  }`;
 }

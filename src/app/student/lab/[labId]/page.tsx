@@ -2,7 +2,75 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Lab, SubmissionFormValues, AnswerDraft } from '@/types';
+import FullPageForm, {
+  type FullPageFormSection,
+  type FullPageFormField,
+} from '@/components/general/forms/FullPageForm';
+import type { Lab } from '@/types';
+
+// Per-question answer stored flat in the form values map
+type StudentValues = Record<string, string | File | null>;
+
+function ImageAnswerField({
+  questionId,
+  value,
+  setValue,
+  error,
+}: {
+  questionId: string;
+  value: File | null;
+  setValue: (f: File | null) => void;
+  error?: string;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  const previewUrl = value ? URL.createObjectURL(value) : null;
+
+  return (
+    <div className="flex flex-col gap-1 md:col-span-2">
+      {previewUrl ? (
+        <div className="relative inline-block">
+          <img
+            src={previewUrl}
+            alt="Answer preview"
+            className="max-h-48 rounded-md border border-gray-200 object-contain"
+          />
+          <button
+            type="button"
+            onClick={() => setValue(null)}
+            className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-xs text-gray-500 shadow hover:bg-red-50 hover:text-red-500"
+          >
+            ×
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => ref.current?.click()}
+          className={`flex w-full items-center justify-center gap-2 rounded-md border-2 border-dashed py-6 text-sm transition-colors ${
+            error
+              ? 'border-red-300 bg-red-50 text-red-400'
+              : 'border-gray-300 bg-gray-50 text-gray-500 hover:border-byu-navy hover:bg-white hover:text-byu-navy'
+          }`}
+        >
+          <UploadIcon />
+          Click to upload image
+        </button>
+      )}
+      <input
+        ref={ref}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0] ?? null;
+          if (file) setValue(file);
+          e.target.value = '';
+        }}
+      />
+      {error && <p className="text-xs text-red-500">{error}</p>}
+    </div>
+  );
+}
 
 export default function StudentLabPage() {
   const { labId } = useParams<{ labId: string }>();
@@ -10,29 +78,24 @@ export default function StudentLabPage() {
 
   const [lab, setLab] = useState<Lab | null>(null);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [values, setValues] = useState<SubmissionFormValues>({
-    studentName: '',
-    answers: {},
-  });
+  const [fetchError, setFetchError] = useState('');
+  const [values, setValues] = useState<StudentValues>({ studentName: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     async function fetchLab() {
       try {
         const res = await fetch(`/api/labs/${labId}`);
-        if (!res.ok) throw new Error('Not found');
+        if (!res.ok) throw new Error();
         const data: Lab = await res.json();
         setLab(data);
-        // Initialize answer drafts
-        const initialAnswers: Record<string, AnswerDraft> = {};
-        data.questions.forEach((q) => {
-          initialAnswers[q.id] = { textContent: '', imageFile: null, imagePreviewUrl: null };
-        });
-        setValues((v) => ({ ...v, answers: initialAnswers }));
+        // Seed empty answers
+        const init: StudentValues = { studentName: '' };
+        data.questions.forEach((q) => { init[q.id] = q.type === 'IMAGE' ? null : ''; });
+        setValues(init);
       } catch {
-        setErrors({ fetch: 'Could not load this lab. Check the link and try again.' });
+        setFetchError('Could not load this lab. Check the link and try again.');
       } finally {
         setLoading(false);
       }
@@ -40,48 +103,15 @@ export default function StudentLabPage() {
     fetchLab();
   }, [labId]);
 
-  const setAnswer = useCallback((questionId: string, patch: Partial<AnswerDraft>) => {
-    setValues((v) => ({
-      ...v,
-      answers: {
-        ...v.answers,
-        [questionId]: { ...v.answers[questionId], ...patch },
-      },
-    }));
-    setErrors((e) => ({ ...e, [questionId]: '' }));
-  }, []);
-
-  const handleImageSelect = useCallback(
-    (questionId: string, file: File) => {
-      const previewUrl = URL.createObjectURL(file);
-      setAnswer(questionId, { imageFile: file, imagePreviewUrl: previewUrl });
-    },
-    [setAnswer],
-  );
-
-  const clearImage = useCallback(
-    (questionId: string) => {
-      const prev = values.answers[questionId];
-      if (prev?.imagePreviewUrl) URL.revokeObjectURL(prev.imagePreviewUrl);
-      setAnswer(questionId, { imageFile: null, imagePreviewUrl: null });
-    },
-    [values.answers, setAnswer],
-  );
-
   const validate = (): boolean => {
+    if (!lab) return false;
     const errs: Record<string, string> = {};
-    if (!values.studentName.trim()) errs.studentName = 'Your name is required';
-    if (lab) {
-      lab.questions.forEach((q) => {
-        const ans = values.answers[q.id];
-        if (q.type === 'TEXT' && !ans?.textContent?.trim()) {
-          errs[q.id] = 'Please enter an answer';
-        }
-        if (q.type === 'IMAGE' && !ans?.imageFile) {
-          errs[q.id] = 'Please upload an image';
-        }
-      });
-    }
+    if (!String(values.studentName ?? '').trim()) errs.studentName = 'Your name is required';
+    lab.questions.forEach((q) => {
+      const ans = values[q.id];
+      if (q.type === 'TEXT' && !String(ans ?? '').trim()) errs[q.id] = 'Please enter an answer';
+      if (q.type === 'IMAGE' && !ans) errs[q.id] = 'Please upload an image';
+    });
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -93,21 +123,21 @@ export default function StudentLabPage() {
     try {
       const fd = new FormData();
       fd.append('labId', lab.id);
-      fd.append('studentName', values.studentName.trim());
+      fd.append('studentName', String(values.studentName ?? '').trim());
       lab.questions.forEach((q) => {
-        const ans = values.answers[q.id];
-        if (q.type === 'IMAGE' && ans?.imageFile) {
-          fd.append(`answer_${q.id}`, ans.imageFile);
+        const ans = values[q.id];
+        if (q.type === 'IMAGE' && ans instanceof File) {
+          fd.append(`answer_${q.id}`, ans);
         } else {
-          fd.append(`answer_${q.id}`, ans?.textContent ?? '');
+          fd.append(`answer_${q.id}`, String(ans ?? ''));
         }
       });
       const res = await fetch('/api/submissions', { method: 'POST', body: fd });
-      if (!res.ok) throw new Error('Submission failed');
-      const submission = await res.json();
-      router.push(`/student/print/${submission.id}`);
+      if (!res.ok) throw new Error();
+      const sub = await res.json();
+      router.push(`/student/print/${sub.id}`);
     } catch {
-      setErrors({ submit: 'Something went wrong. Please try again.' });
+      setErrors((e) => ({ ...e, submit: 'Something went wrong. Please try again.' }));
     } finally {
       setSubmitting(false);
     }
@@ -115,162 +145,105 @@ export default function StudentLabPage() {
 
   if (loading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="flex min-h-screen items-center justify-center bg-gray-100">
         <p className="text-sm text-gray-400">Loading lab…</p>
-      </main>
+      </div>
     );
   }
 
-  if (errors.fetch || !lab) {
+  if (fetchError || !lab) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-50">
-        <p className="text-sm text-red-500">{errors.fetch ?? 'Lab not found.'}</p>
-      </main>
+      <div className="flex min-h-screen items-center justify-center bg-gray-100">
+        <p className="text-sm text-red-500">{fetchError || 'Lab not found.'}</p>
+      </div>
     );
   }
+
+  // Build FullPageForm sections dynamically from the lab
+  const sections: FullPageFormSection<StudentValues>[] = [
+    {
+      kind: 'section',
+      key: 'student-info',
+      title: lab.title,
+      description: `${lab.professorName} · ${lab.className}`,
+      fields: [
+        {
+          kind: 'input',
+          key: 'studentName',
+          label: 'Your name',
+          placeholder: 'First and last name',
+          required: true,
+          colSpan: 2,
+        },
+      ],
+    },
+    {
+      kind: 'section',
+      key: 'answers',
+      title: 'Your answers',
+      fields: lab.questions.flatMap((q, i): FullPageFormField<StudentValues>[] => {
+        if (q.type === 'IMAGE') {
+          return [
+            {
+              kind: 'custom',
+              key: q.id,
+              colSpan: 2,
+              render: ({ value, setValue }) => (
+                <div className="flex flex-col gap-1 md:col-span-2">
+                  <p className="text-sm font-medium text-gray-700">
+                    <span className="mr-1 text-gray-400">Q{i + 1}.</span>
+                    {q.text || `Question ${i + 1}`}
+                    <span className="ml-0.5 text-red-500">*</span>
+                  </p>
+                  <ImageAnswerField
+                    questionId={q.id}
+                    value={value as File | null}
+                    setValue={setValue}
+                    error={errors[q.id]}
+                  />
+                </div>
+              ),
+            },
+          ];
+        }
+        return [
+          {
+            kind: 'input',
+            key: q.id,
+            label: `Q${i + 1}. ${q.text || `Question ${i + 1}`}`,
+            type: 'textarea',
+            placeholder: 'Write your answer here…',
+            required: true,
+            colSpan: 2,
+          },
+        ];
+      }),
+    },
+  ];
 
   return (
-    <main className="min-h-screen bg-gray-50 py-12">
-      <div className="mx-auto max-w-2xl px-4">
-        {/* Lab header */}
-        <div className="mb-8 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-          <p className="text-sm font-medium uppercase tracking-widest text-gray-400">
-            Lab report
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold text-gray-900">{lab.title}</h1>
-          <p className="mt-2 text-sm text-gray-500">
-            {lab.professorName} &nbsp;·&nbsp; {lab.className}
-          </p>
-          <div className="mt-4 border-t border-gray-100 pt-4">
-            <label className="mb-1.5 block text-sm font-medium text-gray-600">Your name</label>
-            <input
-              type="text"
-              value={values.studentName}
-              onChange={(e) =>
-                setValues((v) => ({ ...v, studentName: e.target.value }))
-              }
-              placeholder="First and last name"
-              className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-offset-1 ${
-                errors.studentName
-                  ? 'border-red-300 focus:ring-red-200'
-                  : 'border-gray-200 focus:border-gray-400 focus:ring-gray-100'
-              }`}
-            />
-            {errors.studentName && (
-              <p className="mt-1 text-xs text-red-500">{errors.studentName}</p>
-            )}
-          </div>
-        </div>
-
-        <form onSubmit={handleSubmit} noValidate>
-          <div className="space-y-4">
-            {lab.questions.map((q, i) => {
-              const ans = values.answers[q.id] ?? {
-                textContent: '',
-                imageFile: null,
-                imagePreviewUrl: null,
-              };
-              return (
-                <div
-                  key={q.id}
-                  className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm"
-                >
-                  <p className="mb-3 text-sm font-semibold text-gray-800">
-                    <span className="mr-2 text-gray-400">Q{i + 1}.</span>
-                    {q.text || `Question ${i + 1}`}
-                  </p>
-
-                  {q.type === 'TEXT' ? (
-                    <textarea
-                      value={ans.textContent}
-                      onChange={(e) =>
-                        setAnswer(q.id, { textContent: e.target.value })
-                      }
-                      rows={4}
-                      placeholder="Write your answer here…"
-                      className={`w-full resize-y rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-offset-1 ${
-                        errors[q.id]
-                          ? 'border-red-300 focus:ring-red-200'
-                          : 'border-gray-200 focus:border-gray-400 focus:ring-gray-100'
-                      }`}
-                    />
-                  ) : ans.imagePreviewUrl ? (
-                    <div className="relative inline-block">
-                      <img
-                        src={ans.imagePreviewUrl}
-                        alt="Answer preview"
-                        className="max-h-48 rounded-lg border border-gray-200 object-contain"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => clearImage(q.id)}
-                        className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-xs text-gray-500 shadow hover:bg-red-50 hover:text-red-400"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ) : (
-                    <div
-                      onClick={() => fileInputRefs.current[q.id]?.click()}
-                      className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed py-8 text-sm transition-colors ${
-                        errors[q.id]
-                          ? 'border-red-300 bg-red-50'
-                          : 'border-gray-200 bg-gray-50 hover:border-gray-400 hover:bg-white'
-                      }`}
-                    >
-                      <UploadIcon />
-                      <span className="text-gray-500">Click to upload image</span>
-                      <input
-                        ref={(el) => { fileInputRefs.current[q.id] = el; }}
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) handleImageSelect(q.id, file);
-                        }}
-                      />
-                    </div>
-                  )}
-
-                  {errors[q.id] && (
-                    <p className="mt-1.5 text-xs text-red-500">{errors[q.id]}</p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {errors.submit && (
-            <p className="mt-4 rounded-lg bg-red-50 px-4 py-2 text-sm text-red-600">
-              {errors.submit}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={submitting}
-            className="mt-6 w-full rounded-xl bg-gray-900 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-          >
-            {submitting ? 'Submitting…' : 'Submit & save as PDF →'}
-          </button>
-        </form>
-      </div>
-    </main>
+    <div className="min-h-screen bg-gray-100 py-10">
+      <FullPageForm
+        title="Lab report"
+        values={values}
+        setValues={setValues}
+        sections={sections}
+        errors={errors}
+        onSubmit={handleSubmit}
+        submitLabel="Submit & save as PDF"
+        submitting={submitting}
+        maxWidthClass="max-w-2xl"
+      />
+      {errors.submit && (
+        <p className="mx-auto mt-2 max-w-2xl px-6 text-sm text-red-500">{errors.submit}</p>
+      )}
+    </div>
   );
 }
 
 function UploadIcon() {
   return (
-    <svg
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      className="text-gray-400"
-    >
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
       <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" />
     </svg>
   );
