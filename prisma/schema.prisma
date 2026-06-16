@@ -1,0 +1,66 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Lab {
+  id            String       @id @default(cuid())
+  title         String
+  professorName String
+  className     String
+  questions     Question[]
+  submissions   Submission[]
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@map("labs")
+}
+
+model Question {
+  id        String         @id @default(cuid())
+  labId     String
+  lab       Lab            @relation(fields: [labId], references: [id], onDelete: Cascade)
+  text      String
+  type      QuestionType   @default(TEXT)
+  order     Int
+  answers   Answer[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@map("questions")
+}
+
+model Submission {
+  id          String   @id @default(cuid())
+  labId       String
+  lab         Lab      @relation(fields: [labId], references: [id], onDelete: Cascade)
+  studentName String
+  answers     Answer[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("submissions")
+}
+
+model Answer {
+  id           String     @id @default(cuid())
+  submissionId String
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  questionId   String
+  question     Question   @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  textContent  String?
+  imageKey     String?    // MinIO object key
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@map("answers")
+}
+
+enum QuestionType {
+  TEXT
+  IMAGE
+}
