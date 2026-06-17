@@ -224,7 +224,6 @@ export default function StudentLabPage() {
   return (
     <div className="min-h-screen bg-gray-100 py-10">
       <FullPageForm
-        title="Lab report"
         values={values}
         setValues={setValues}
         sections={sections}

@@ -2,34 +2,38 @@
 
 import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  DragEndEvent,
-} from '@dnd-kit/core';
-import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-  arrayMove,
-} from '@dnd-kit/sortable';
-import { restrictToVerticalAxis, restrictToWindowEdges } from '@dnd-kit/modifiers';
-import FullPageForm, {
-  type FullPageFormSection,
-} from '@/components/general/forms/FullPageForm';
-import type { QuestionDraft } from '@/types';
+import { FiTrash2 } from 'react-icons/fi';
+import DroppableBoard, {
+  DragHandle,
+  type BoardColumn,
+  type BoardItem,
+} from '@/components/general/dnd/DroppableBoard';
+import Button from '@/components/general/actions/Button';
+import IconButton from '@/components/general/actions/IconButton';
+import FieldWrapper from '@/components/general/forms/FieldWrapper';
+import TextLikeField from '@/components/general/forms/TextLikeField';
+import RadioGroupField from '@/components/general/forms/RadioGroupField';
+import type { QuestionType } from '@/types';
+
+// BoardItem requires `id` and `columnId` — we extend with question fields
+type QuestionItem = BoardItem & {
+  text: string;
+  type: QuestionType;
+  order: number;
+};
+
+const COLUMN_ID = 'questions';
 
 function uid() {
   return Math.random().toString(36).slice(2, 10);
 }
 
-function emptyQuestion(order: number): QuestionDraft {
-  return { id: uid(), text: '', type: 'TEXT', order };
+function emptyQuestion(): QuestionItem {
+  return { id: uid(), columnId: COLUMN_ID, text: '', type: 'TEXT', order: 0 };
 }
+
+const SECTION_TITLE_CLASS = 'text-2xl font-semibold text-byu-navy';
+const SECTION_DESC_CLASS = 'text-sm text-gray-600 mt-1';
 
 type ProfessorFormValues = {
   title: string;
@@ -37,53 +41,57 @@ type ProfessorFormValues = {
   className: string;
 };
 
-function GripIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor">
-      <circle cx="6" cy="5" r="1.3" />
-      <circle cx="6" cy="9" r="1.3" />
-      <circle cx="6" cy="13" r="1.3" />
-      <circle cx="12" cy="5" r="1.3" />
-      <circle cx="12" cy="9" r="1.3" />
-      <circle cx="12" cy="13" r="1.3" />
-    </svg>
-  );
-}
-
 export default function ProfessorPage() {
   const router = useRouter();
+
   const [values, setValues] = useState<ProfessorFormValues>({
     title: '',
     professorName: '',
     className: '',
   });
-  const [questions, setQuestions] = useState<QuestionDraft[]>([emptyQuestion(0)]);
+
+  const [columns, setColumns] = useState<BoardColumn<QuestionItem>[]>([
+    { id: COLUMN_ID, header: null, items: [emptyQuestion()] },
+  ]);
+
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  // Convenience accessor for the single column's items
+  const questions = columns[0]?.items ?? [];
+
+  const setQuestions = useCallback((updater: (prev: QuestionItem[]) => QuestionItem[]) => {
+    setColumns((cols) => cols.map((col) =>
+      col.id === COLUMN_ID ? { ...col, items: updater(col.items) } : col,
+    ));
+  }, []);
+
+  const updateQuestion = useCallback(
+    (id: string, field: keyof Omit<QuestionItem, 'id' | 'columnId'>, value: string) => {
+      setQuestions((qs) => qs.map((q) => (q.id === id ? { ...q, [field]: value } : q)));
+      setErrors((e) => {
+        const next = { ...e };
+        // Clear the error for this question's text field if it's being edited
+        Object.keys(next).forEach((k) => { if (k.startsWith(`q_${id}`)) delete next[k]; });
+        return next;
+      });
+    },
+    [setQuestions],
   );
 
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    const { active, over } = event;
-    if (over && active.id !== over.id) {
-      setQuestions((qs) => {
-        const from = qs.findIndex((q) => q.id === active.id);
-        const to = qs.findIndex((q) => q.id === over.id);
-        return arrayMove(qs, from, to);
-      });
-    }
-  }, []);
+  const removeQuestion = useCallback(
+    (id: string) => setQuestions((qs) => qs.filter((q) => q.id !== id)),
+    [setQuestions],
+  );
 
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
     if (!values.title.trim()) errs.title = 'Lab title is required';
     if (!values.professorName.trim()) errs.professorName = 'Professor name is required';
     if (!values.className.trim()) errs.className = 'Class is required';
-    questions.forEach((q, i) => {
-      if (!q.text.trim()) errs[`questions.${i}.text`] = 'Question text is required';
+    if (questions.length === 0) errs.questions = 'Add at least one question';
+    questions.forEach((q) => {
+      if (!q.text.trim()) errs[`q_${q.id}_text`] = 'Question text is required';
     });
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -97,7 +105,15 @@ export default function ProfessorPage() {
       const res = await fetch('/api/labs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...values, questions }),
+        body: JSON.stringify({
+          ...values,
+          questions: questions.map((q, i) => ({
+            id: q.id,
+            text: q.text,
+            type: q.type,
+            order: i,
+          })),
+        }),
       });
       if (!res.ok) throw new Error();
       const lab = await res.json();
@@ -109,119 +125,170 @@ export default function ProfessorPage() {
     }
   };
 
-  const sections: FullPageFormSection<ProfessorFormValues, QuestionDraft>[] = [
-    {
-      kind: 'section',
-      key: 'lab-details',
-      title: 'Lab details',
-      description: "This information will appear at the top of every student's report.",
-      fields: [
-        {
-          kind: 'input',
-          key: 'title',
-          label: 'Lab title',
-          placeholder: 'e.g. Enzyme Kinetics Lab',
-          required: true,
-          colSpan: 2,
-        },
-        {
-          kind: 'input',
-          key: 'professorName',
-          label: 'Professor name',
-          placeholder: 'Dr. Smith',
-          required: true,
-        },
-        {
-          kind: 'input',
-          key: 'className',
-          label: 'Class',
-          placeholder: 'CHEM 3450',
-          required: true,
-        },
-      ],
-    },
-    {
-      kind: 'repeater',
-      key: 'questions',
-      title: 'Questions',
-      description: 'Add each question students will answer. Drag to reorder.',
-      addButtonLabel: 'Add question',
-      emptyMessage: 'No questions yet — add one below.',
-      items: questions,
-      onAdd: () => setQuestions((qs) => [...qs, emptyQuestion(qs.length)]),
-      onRemove: (i) => setQuestions((qs) => qs.filter((_, idx) => idx !== i)),
-      getItemValue: (item, key) => (item as any)[key],
-      setItemValue: (index, key, value) =>
-        setQuestions((qs) =>
-          qs.map((q, i) => (i === index ? { ...q, [key]: value } : q)),
-        ),
-      fields: [
-        {
-          kind: 'input',
-          key: 'text',
-          label: 'Question text',
-          placeholder: 'e.g. Describe the reaction you observed…',
-          required: true,
-          colSpan: 2,
-        },
-        {
-          kind: 'radio',
-          key: 'type',
-          label: 'Response format',
-          options: [
-            { label: 'Text answer', value: 'TEXT' },
-            { label: 'Image upload', value: 'IMAGE' },
-          ],
-        },
-        {
-          kind: 'custom',
-          key: 'drag-handle',
-          colSpan: 1,
-          render: () => (
-            <div className="flex items-end justify-end pb-1">
-              <span
-                className="cursor-grab touch-none text-gray-300 hover:text-gray-500"
-                title="Drag to reorder"
-              >
-                <GripIcon />
-              </span>
-            </div>
-          ),
-        },
-      ],
-    },
-  ];
-
   return (
     <div className="min-h-screen bg-gray-100 py-10">
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        modifiers={[restrictToVerticalAxis, restrictToWindowEdges]}
-        onDragEnd={handleDragEnd}
+      <form
+        onSubmit={handleSubmit}
+        className="max-w-2xl mx-auto mt-4 mb-8 space-y-10 rounded-md bg-white p-6 shadow-md"
       >
-        <SortableContext
-          items={questions.map((q) => q.id)}
-          strategy={verticalListSortingStrategy}
-        >
-          <FullPageForm
-            title="Create a lab report"
-            intro="Set up the lab details and questions. Students will receive a link to fill in their answers."
-            values={values}
-            setValues={setValues}
-            sections={sections}
-            errors={errors}
-            onSubmit={handleSubmit}
-            submitLabel="Save lab & share with students"
-            submitting={submitting}
-            maxWidthClass="max-w-2xl"
-          />
-        </SortableContext>
-      </DndContext>
+        {/* Page title */}
+        <div className="space-y-2">
+          <h1 className="text-byu-navy text-3xl font-semibold">Create a lab report</h1>
+          <p className="text-sm text-gray-700">
+            Set up the lab details and questions. Students will receive a link to fill in their answers.
+          </p>
+        </div>
 
-      {errors.submit && (
-        <p className="mx-auto mt-2 max-w-2xl px-6 text-sm text-red-500">{errors.submit}</p>
-      )}
+        {/* Lab details */}
+        <section className="space-y-4">
+          <div>
+            <h2 className={SECTION_TITLE_CLASS}>Lab details</h2>
+            <p className={SECTION_DESC_CLASS}>
+              This information will appear at the top of every student's report.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="md:col-span-2">
+              <FieldWrapper label="Lab title" required error={errors.title}>
+                <TextLikeField
+                  as="input"
+                  type="text"
+                  value={values.title}
+                  onChange={(v) => {
+                    setValues((p) => ({ ...p, title: v }));
+                    setErrors((e) => ({ ...e, title: '' }));
+                  }}
+                  placeholder="e.g. Enzyme Kinetics Lab"
+                  includeTextColor
+                />
+              </FieldWrapper>
+            </div>
+            <FieldWrapper label="Professor name" required error={errors.professorName}>
+              <TextLikeField
+                as="input"
+                type="text"
+                value={values.professorName}
+                onChange={(v) => {
+                  setValues((p) => ({ ...p, professorName: v }));
+                  setErrors((e) => ({ ...e, professorName: '' }));
+                }}
+                placeholder="Dr. Smith"
+                includeTextColor
+              />
+            </FieldWrapper>
+            <FieldWrapper label="Class" required error={errors.className}>
+              <TextLikeField
+                as="input"
+                type="text"
+                value={values.className}
+                onChange={(v) => {
+                  setValues((p) => ({ ...p, className: v }));
+                  setErrors((e) => ({ ...e, className: '' }));
+                }}
+                placeholder="CHEM 3450"
+                includeTextColor
+              />
+            </FieldWrapper>
+          </div>
+        </section>
+
+        {/* Questions */}
+        <section className="space-y-4">
+          <div>
+            <h2 className={SECTION_TITLE_CLASS}>Questions</h2>
+            <p className={SECTION_DESC_CLASS}>
+              Add each question students will answer. Drag the handle to reorder.
+            </p>
+          </div>
+
+          {errors.questions && (
+            <p className="text-sm text-red-500">{errors.questions}</p>
+          )}
+
+          <DroppableBoard
+            columns={columns}
+            onColumnsChange={setColumns}
+            // Single-column layout: stretch to full width, no column chrome
+            className="block w-full"
+            columnClassName="flex flex-col gap-3 w-full"
+            renderItem={(item, dragHandleProps) => (
+              <div className="border border-gray-300 rounded-md p-4 bg-white shadow-sm">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {/* Question text — full width */}
+                  <div className="md:col-span-2">
+                    <FieldWrapper
+                      label="Question text"
+                      required
+                      error={errors[`q_${item.id}_text`]}
+                    >
+                      <TextLikeField
+                        as="input"
+                        type="text"
+                        value={item.text}
+                        onChange={(v) => updateQuestion(item.id as string, 'text', v)}
+                        placeholder="e.g. Describe the reaction you observed…"
+                        includeTextColor
+                      />
+                    </FieldWrapper>
+                  </div>
+
+                  {/* Response format */}
+                  <FieldWrapper label="Response format">
+                    <RadioGroupField
+                      name={`type-${item.id}`}
+                      value={item.type}
+                      onChange={(v) => updateQuestion(item.id as string, 'type', v)}
+                      options={[
+                        { label: 'Text answer', value: 'TEXT' },
+                        { label: 'Image upload', value: 'IMAGE' },
+                      ]}
+                    />
+                  </FieldWrapper>
+
+                  {/* Drag handle + delete */}
+                  <div className="flex items-end justify-end gap-2 pb-1">
+                    <DragHandle {...dragHandleProps} />
+                    {questions.length > 1 && (
+                      <IconButton
+                        type="button"
+                        variant="danger"
+                        icon={<FiTrash2 className="h-4 w-4" />}
+                        onClick={() => removeQuestion(item.id as string)}
+                        title="Remove question"
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            renderColumnFooter={() => (
+              <Button
+                type="button"
+                variant="subtle"
+                size="sm"
+                onClick={() => setQuestions((qs) => [...qs, emptyQuestion()])}
+                icon={<span className="text-base leading-none">+</span>}
+                label="Add question"
+              />
+            )}
+          />
+        </section>
+
+        {errors.submit && (
+          <p className="text-sm text-red-500">{errors.submit}</p>
+        )}
+
+        <div className="flex justify-center pt-2">
+          <Button
+            type="submit"
+            size="lg"
+            disabled={submitting}
+            loading={submitting}
+            loadingLabel="Saving…"
+            label="Save lab & share with students"
+          />
+        </div>
+      </form>
     </div>
   );
 }

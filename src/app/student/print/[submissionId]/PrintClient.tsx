@@ -75,12 +75,17 @@ export default function PrintClient({ data }: { data: PrintData }) {
                   <p className="mb-3 text-sm font-medium text-gray-800">
                     {q.text || `Question ${i + 1}`}
                   </p>
-                  {q.type === 'IMAGE' && ans?.imageUrl ? (
+                  {ans?.imageUrl ? (
                     <img
                       src={ans.imageUrl}
                       alt={`Answer to question ${i + 1}`}
                       className="max-w-full rounded-lg border border-gray-100"
+                      style={{ pageBreakInside: 'avoid' }}
                     />
+                  ) : q.type === 'IMAGE' && !ans?.imageUrl ? (
+                    <div className="min-h-[4rem] rounded-lg border border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-400 italic">
+                      No image uploaded
+                    </div>
                   ) : (
                     <div className="min-h-[4rem] rounded-lg border border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-700 whitespace-pre-wrap">
                       {ans?.textContent || <span className="text-gray-400 italic">No answer</span>}

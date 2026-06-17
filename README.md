@@ -2,16 +2,6 @@
 
 A Next.js app for streamlined lab report creation. Professors set up labs with questions; students fill them in and export to PDF.
 
-## Stack
-
-- **Next.js 15** (App Router, server components)
-- **TypeScript**
-- **Tailwind CSS**
-- **Prisma** + **PostgreSQL**
-- **MinIO** (image uploads)
-- **@dnd-kit** (drag-to-reorder questions)
-- **Docker** + **Nginx**
-
 ## Routes
 
 | Route | Who | Purpose |
