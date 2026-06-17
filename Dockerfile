@@ -9,16 +9,15 @@ RUN npm ci
 
 # 2. Build the app
 FROM base AS builder
-RUN apk add --no-cache openssl
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npx prisma generate
+# Use the local prisma binary from node_modules to avoid npx fetching v7
+RUN node_modules/.bin/prisma generate
 RUN npm run build
 
 # 3. Production image
 FROM base AS runner
-RUN apk add --no-cache openssl
 WORKDIR /app
 ENV NODE_ENV=production
 
@@ -29,7 +28,7 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/src/generated ./src/generated
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
 USER nextjs
 EXPOSE 3000
