@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getPresignedUrl } from '@/lib/minio';
 
 export async function GET(
   _req: NextRequest,
@@ -20,16 +19,11 @@ export async function GET(
       return NextResponse.json({ error: 'Submission not found' }, { status: 404 });
     }
 
-    // Resolve presigned URLs for any image answers
-    const answersWithUrls = await Promise.all(
-      submission.answers.map(async (answer) => {
-        if (answer.imageKey) {
-          const imageUrl = await getPresignedUrl(answer.imageKey);
-          return { ...answer, imageUrl };
-        }
-        return answer;
-      }),
-    );
+    // Use the image proxy route instead of presigned MinIO URLs
+    const answersWithUrls = submission.answers.map((answer) => ({
+      ...answer,
+      imageUrl: answer.imageKey ? `/api/images/${answer.imageKey}` : null,
+    }));
 
     return NextResponse.json({ ...submission, answers: answersWithUrls });
   } catch (error) {
