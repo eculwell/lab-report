@@ -229,7 +229,7 @@ export default function StudentLabPage() {
         sections={sections}
         errors={errors}
         onSubmit={handleSubmit}
-        submitLabel="Submit & save as PDF"
+        submitLabel="Save as PDF"
         submitting={submitting}
         maxWidthClass="max-w-2xl"
       />

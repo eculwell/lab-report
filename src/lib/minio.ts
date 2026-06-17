@@ -45,9 +45,17 @@ export async function uploadImage(
 
 /**
  * Generate a presigned URL valid for 1 hour.
+ * Replaces the internal Docker hostname with the public-facing endpoint
+ * so browsers can actually load the image.
  */
 export async function getPresignedUrl(key: string): Promise<string> {
-  return minio.presignedGetObject(BUCKET_NAME, key, 60 * 60);
+  const url = await minio.presignedGetObject(BUCKET_NAME, key, 60 * 60);
+  const publicEndpoint = process.env.MINIO_PUBLIC_ENDPOINT;
+  if (publicEndpoint) {
+    const internalHost = `${process.env.MINIO_ENDPOINT ?? 'minio'}:${process.env.MINIO_PORT ?? '9000'}`;
+    return url.replace(internalHost, publicEndpoint);
+  }
+  return url;
 }
 
 /**

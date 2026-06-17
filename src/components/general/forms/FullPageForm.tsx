@@ -65,7 +65,7 @@ type FullPageFormProps<TValues, TRepeaterItem = any> = {
   maxWidthClass?: string;
 };
 
-const SECTION_TITLE_CLASS = 'text-2xl font-semibold text-byu-navy';
+const SECTION_TITLE_CLASS = 'text-2xl font-semibold text-byu-navy break-words';
 const SECTION_DESC_CLASS = 'text-sm text-gray-600 mt-1';
 const BOX_CLASS = 'border border-gray-300 rounded-md p-4 space-y-6 bg-white shadow-sm';
 

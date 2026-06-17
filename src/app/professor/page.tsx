@@ -3,11 +3,10 @@
 import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { FiTrash2 } from 'react-icons/fi';
-import DroppableBoard, {
+import SortableList, {
   DragHandle,
-  type BoardColumn,
-  type BoardItem,
-} from '@/components/general/dnd/DroppableBoard';
+  type SortableItem,
+} from '@/components/general/dnd/SortableList';
 import Button from '@/components/general/actions/Button';
 import IconButton from '@/components/general/actions/IconButton';
 import FieldWrapper from '@/components/general/forms/FieldWrapper';
@@ -15,27 +14,24 @@ import TextLikeField from '@/components/general/forms/TextLikeField';
 import RadioGroupField from '@/components/general/forms/RadioGroupField';
 import type { QuestionType } from '@/types';
 
-// BoardItem requires `id` and `columnId` — we extend with question fields
-type QuestionItem = BoardItem & {
+// SortableItem requires `id` — we extend with question fields
+type QuestionItem = SortableItem & {
   text: string;
   type: QuestionType;
-  order: number;
 };
-
-const COLUMN_ID = 'questions';
 
 function uid() {
   return Math.random().toString(36).slice(2, 10);
 }
 
 function emptyQuestion(): QuestionItem {
-  return { id: uid(), columnId: COLUMN_ID, text: '', type: 'TEXT', order: 0 };
+  return { id: uid(), text: '', type: 'TEXT' };
 }
 
 const SECTION_TITLE_CLASS = 'text-2xl font-semibold text-byu-navy';
 const SECTION_DESC_CLASS = 'text-sm text-gray-600 mt-1';
 
-type ProfessorFormValues = {
+type LabValues = {
   title: string;
   professorName: string;
   className: string;
@@ -44,44 +40,30 @@ type ProfessorFormValues = {
 export default function ProfessorPage() {
   const router = useRouter();
 
-  const [values, setValues] = useState<ProfessorFormValues>({
+  const [values, setValues] = useState<LabValues>({
     title: '',
     professorName: '',
     className: '',
   });
-
-  const [columns, setColumns] = useState<BoardColumn<QuestionItem>[]>([
-    { id: COLUMN_ID, header: null, items: [emptyQuestion()] },
-  ]);
-
+  const [questions, setQuestions] = useState<QuestionItem[]>([emptyQuestion()]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
 
-  // Convenience accessor for the single column's items
-  const questions = columns[0]?.items ?? [];
-
-  const setQuestions = useCallback((updater: (prev: QuestionItem[]) => QuestionItem[]) => {
-    setColumns((cols) => cols.map((col) =>
-      col.id === COLUMN_ID ? { ...col, items: updater(col.items) } : col,
-    ));
-  }, []);
-
   const updateQuestion = useCallback(
-    (id: string, field: keyof Omit<QuestionItem, 'id' | 'columnId'>, value: string) => {
+    (id: string, field: 'text' | 'type', value: string) => {
       setQuestions((qs) => qs.map((q) => (q.id === id ? { ...q, [field]: value } : q)));
       setErrors((e) => {
         const next = { ...e };
-        // Clear the error for this question's text field if it's being edited
-        Object.keys(next).forEach((k) => { if (k.startsWith(`q_${id}`)) delete next[k]; });
+        delete next[`q_${id}_text`];
         return next;
       });
     },
-    [setQuestions],
+    [],
   );
 
   const removeQuestion = useCallback(
     (id: string) => setQuestions((qs) => qs.filter((q) => q.id !== id)),
-    [setQuestions],
+    [],
   );
 
   const validate = (): boolean => {
@@ -205,16 +187,13 @@ export default function ProfessorPage() {
             <p className="text-sm text-red-500">{errors.questions}</p>
           )}
 
-          <DroppableBoard
-            columns={columns}
-            onColumnsChange={setColumns}
-            // Single-column layout: stretch to full width, no column chrome
-            className="block w-full"
-            columnClassName="flex flex-col gap-3 w-full"
+          <SortableList
+            items={questions}
+            onReorder={setQuestions}
+            lockAxis
             renderItem={(item, dragHandleProps) => (
               <div className="border border-gray-300 rounded-md p-4 bg-white shadow-sm">
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  {/* Question text — full width */}
                   <div className="md:col-span-2">
                     <FieldWrapper
                       label="Question text"
@@ -232,7 +211,6 @@ export default function ProfessorPage() {
                     </FieldWrapper>
                   </div>
 
-                  {/* Response format */}
                   <FieldWrapper label="Response format">
                     <RadioGroupField
                       name={`type-${item.id}`}
@@ -245,7 +223,6 @@ export default function ProfessorPage() {
                     />
                   </FieldWrapper>
 
-                  {/* Drag handle + delete */}
                   <div className="flex items-end justify-end gap-2 pb-1">
                     <DragHandle {...dragHandleProps} />
                     {questions.length > 1 && (
@@ -261,16 +238,15 @@ export default function ProfessorPage() {
                 </div>
               </div>
             )}
-            renderColumnFooter={() => (
-              <Button
-                type="button"
-                variant="subtle"
-                size="sm"
-                onClick={() => setQuestions((qs) => [...qs, emptyQuestion()])}
-                icon={<span className="text-base leading-none">+</span>}
-                label="Add question"
-              />
-            )}
+          />
+
+          <Button
+            type="button"
+            variant="subtle"
+            size="sm"
+            onClick={() => setQuestions((qs) => [...qs, emptyQuestion()])}
+            icon={<span className="text-base leading-none">+</span>}
+            label="Add question"
           />
         </section>
 
