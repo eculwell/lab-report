@@ -1,29 +1,35 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import FullPageForm, {
   type FullPageFormSection,
   type FullPageFormField,
 } from '@/components/general/forms/FullPageForm';
+import { useDraftAnswers, dataUrlToFile } from '@/hooks/useDraftAnswers';
 import type { Lab } from '@/types';
 
-// Per-question answer stored flat in the form values map
 type StudentValues = Record<string, string | File | null>;
 
 function ImageAnswerField({
-  questionId,
   value,
   setValue,
   error,
 }: {
-  questionId: string;
   value: File | null;
   setValue: (f: File | null) => void;
   error?: string;
 }) {
   const ref = useRef<HTMLInputElement>(null);
-  const previewUrl = value ? URL.createObjectURL(value) : null;
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  // Update preview URL when value changes, revoke old one to avoid memory leaks
+  useEffect(() => {
+    if (!value) { setPreviewUrl(null); return; }
+    const url = URL.createObjectURL(value);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [value]);
 
   return (
     <div className="flex flex-col gap-1 md:col-span-2">
@@ -82,7 +88,14 @@ export default function StudentLabPage() {
   const [values, setValues] = useState<StudentValues>({ studentName: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [draftRestored, setDraftRestored] = useState(false);
+  // Prevents auto-save from firing before the draft has been loaded
+  const draftLoadedRef = useRef(false);
 
+  const { loadDraft, saveStudentName, saveText, saveImage, clearImage, clearDraft } =
+    useDraftAnswers(labId);
+
+  // Fetch lab and merge any saved draft into the initial values
   useEffect(() => {
     async function fetchLab() {
       try {
@@ -90,10 +103,29 @@ export default function StudentLabPage() {
         if (!res.ok) throw new Error();
         const data: Lab = await res.json();
         setLab(data);
-        // Seed empty answers
-        const init: StudentValues = { studentName: '' };
-        data.questions.forEach((q) => { init[q.id] = q.type === 'IMAGE' ? null : ''; });
+
+        const draft = loadDraft();
+        const hasDraft =
+          draft.studentName ||
+          Object.keys(draft.textAnswers).length > 0 ||
+          Object.keys(draft.imageDataUrls).length > 0;
+
+        // Build initial values, merging in saved draft
+        const init: StudentValues = {
+          studentName: draft.studentName || '',
+        };
+        data.questions.forEach((q) => {
+          if (q.type === 'IMAGE') {
+            const saved = draft.imageDataUrls[q.id];
+            init[q.id] = saved ? dataUrlToFile(saved) : null;
+          } else {
+            init[q.id] = draft.textAnswers[q.id] ?? '';
+          }
+        });
+
+        draftLoadedRef.current = true;
         setValues(init);
+        if (hasDraft) setDraftRestored(true);
       } catch {
         setFetchError('Could not load this lab. Check the link and try again.');
       } finally {
@@ -101,7 +133,16 @@ export default function StudentLabPage() {
       }
     }
     fetchLab();
-  }, [labId]);
+  }, [labId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-save text answers and student name whenever values change
+  useEffect(() => {
+    if (!draftLoadedRef.current || !lab) return;
+    saveStudentName(String(values.studentName ?? ''));
+    lab.questions.forEach((q) => {
+      if (q.type === 'TEXT') saveText(q.id, String(values[q.id] ?? ''));
+    });
+  }, [values, lab, saveStudentName, saveText]);
 
   const validate = (): boolean => {
     if (!lab) return false;
@@ -135,6 +176,7 @@ export default function StudentLabPage() {
       const res = await fetch('/api/submissions', { method: 'POST', body: fd });
       if (!res.ok) throw new Error();
       const sub = await res.json();
+      clearDraft(); // wipe saved draft on successful submission
       router.push(`/student/print/${sub.id}`);
     } catch {
       setErrors((e) => ({ ...e, submit: 'Something went wrong. Please try again.' }));
@@ -142,6 +184,78 @@ export default function StudentLabPage() {
       setSubmitting(false);
     }
   };
+
+  // Memoize sections so they're not rebuilt on every render
+  const sections = useMemo((): FullPageFormSection<StudentValues>[] => {
+    if (!lab) return [];
+    return [
+      {
+        kind: 'section',
+        key: 'student-info',
+        title: lab.title,
+        description: `${lab.professorName} · ${lab.className}`,
+        fields: [
+          {
+            kind: 'input',
+            key: 'studentName',
+            label: 'Your name',
+            placeholder: 'First and last name',
+            required: true,
+            colSpan: 2,
+          },
+        ],
+      },
+      {
+        kind: 'section',
+        key: 'answers',
+        title: 'Your answers',
+        fields: lab.questions.flatMap((q, i): FullPageFormField<StudentValues>[] => {
+          if (q.type === 'IMAGE') {
+            return [
+              {
+                kind: 'custom',
+                key: q.id,
+                colSpan: 2,
+                render: ({ value, setValue }) => {
+                  // Wrap setValue to also persist/clear the image in localStorage
+                  const handleSetImage = (file: File | null) => {
+                    setValue(file);
+                    if (file) saveImage(q.id, file);
+                    else clearImage(q.id);
+                  };
+                  return (
+                    <div className="flex flex-col gap-1 md:col-span-2">
+                      <p className="text-sm font-medium text-gray-700">
+                        <span className="mr-1 text-gray-400">Q{i + 1}.</span>
+                        {q.text || `Question ${i + 1}`}
+                        <span className="ml-0.5 text-red-500">*</span>
+                      </p>
+                      <ImageAnswerField
+                        value={value as File | null}
+                        setValue={handleSetImage}
+                        error={errors[q.id]}
+                      />
+                    </div>
+                  );
+                },
+              },
+            ];
+          }
+          return [
+            {
+              kind: 'input',
+              key: q.id,
+              label: `Q${i + 1}. ${q.text || `Question ${i + 1}`}`,
+              type: 'textarea',
+              placeholder: 'Write your answer here…',
+              required: true,
+              colSpan: 2,
+            },
+          ];
+        }),
+      },
+    ];
+  }, [lab, errors, saveImage, clearImage]);
 
   if (loading) {
     return (
@@ -159,70 +273,24 @@ export default function StudentLabPage() {
     );
   }
 
-  // Build FullPageForm sections dynamically from the lab
-  const sections: FullPageFormSection<StudentValues>[] = [
-    {
-      kind: 'section',
-      key: 'student-info',
-      title: lab.title,
-      description: `${lab.professorName} · ${lab.className}`,
-      fields: [
-        {
-          kind: 'input',
-          key: 'studentName',
-          label: 'Your name',
-          placeholder: 'First and last name',
-          required: true,
-          colSpan: 2,
-        },
-      ],
-    },
-    {
-      kind: 'section',
-      key: 'answers',
-      title: 'Your answers',
-      fields: lab.questions.flatMap((q, i): FullPageFormField<StudentValues>[] => {
-        if (q.type === 'IMAGE') {
-          return [
-            {
-              kind: 'custom',
-              key: q.id,
-              colSpan: 2,
-              render: ({ value, setValue }) => (
-                <div className="flex flex-col gap-1 md:col-span-2">
-                  <p className="text-sm font-medium text-gray-700">
-                    <span className="mr-1 text-gray-400">Q{i + 1}.</span>
-                    {q.text || `Question ${i + 1}`}
-                    <span className="ml-0.5 text-red-500">*</span>
-                  </p>
-                  <ImageAnswerField
-                    questionId={q.id}
-                    value={value as File | null}
-                    setValue={setValue}
-                    error={errors[q.id]}
-                  />
-                </div>
-              ),
-            },
-          ];
-        }
-        return [
-          {
-            kind: 'input',
-            key: q.id,
-            label: `Q${i + 1}. ${q.text || `Question ${i + 1}`}`,
-            type: 'textarea',
-            placeholder: 'Write your answer here…',
-            required: true,
-            colSpan: 2,
-          },
-        ];
-      }),
-    },
-  ];
-
   return (
     <div className="min-h-screen bg-gray-100 py-10">
+      {/* Draft restored banner */}
+      {draftRestored && (
+        <div className="mx-auto mb-4 max-w-2xl px-4">
+          <div className="flex items-center justify-between rounded-md border border-green-200 bg-green-50 px-4 py-2.5 text-sm text-green-700">
+            <span>✓ Your previous answers have been restored.</span>
+            <button
+              type="button"
+              onClick={() => setDraftRestored(false)}
+              className="ml-4 text-green-500 hover:text-green-700"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       <FullPageForm
         values={values}
         setValues={setValues}
@@ -233,8 +301,16 @@ export default function StudentLabPage() {
         submitting={submitting}
         maxWidthClass="max-w-2xl"
       />
+
       {errors.submit && (
         <p className="mx-auto mt-2 max-w-2xl px-6 text-sm text-red-500">{errors.submit}</p>
+      )}
+
+      {/* Subtle auto-save indicator */}
+      {draftLoadedRef.current && !submitting && (
+        <p className="mt-2 text-center text-xs text-gray-400">
+          Progress saved automatically
+        </p>
       )}
     </div>
   );

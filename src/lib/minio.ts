@@ -18,16 +18,16 @@ if (process.env.NODE_ENV !== 'production') globalForMinio.minio = minio;
 
 export const BUCKET_NAME = process.env.MINIO_BUCKET ?? 'lab-reports';
 
+// Module-level flag so ensureBucket() only makes a network call once per process
+let bucketReady = false;
+
 export async function ensureBucket() {
+  if (bucketReady) return;
   const exists = await minio.bucketExists(BUCKET_NAME);
-  if (!exists) {
-    await minio.makeBucket(BUCKET_NAME);
-  }
+  if (!exists) await minio.makeBucket(BUCKET_NAME);
+  bucketReady = true;
 }
 
-/**
- * Upload a file buffer to MinIO and return the object key.
- */
 export async function uploadImage(
   buffer: Buffer,
   originalFilename: string,
@@ -43,24 +43,6 @@ export async function uploadImage(
   return key;
 }
 
-/**
- * Generate a presigned URL valid for 1 hour.
- * Replaces the internal Docker hostname with the public-facing endpoint
- * so browsers can actually load the image.
- */
-export async function getPresignedUrl(key: string): Promise<string> {
-  const url = await minio.presignedGetObject(BUCKET_NAME, key, 60 * 60);
-  const publicEndpoint = process.env.MINIO_PUBLIC_ENDPOINT;
-  if (publicEndpoint) {
-    const internalHost = `${process.env.MINIO_ENDPOINT ?? 'minio'}:${process.env.MINIO_PORT ?? '9000'}`;
-    return url.replace(internalHost, publicEndpoint);
-  }
-  return url;
-}
-
-/**
- * Delete an object from MinIO.
- */
 export async function deleteImage(key: string): Promise<void> {
   await minio.removeObject(BUCKET_NAME, key);
 }

@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, master, dev]
   pull_request:
-    branches: [main]
+    branches: [main, master]
 
 jobs:
   lint-and-build:
@@ -49,8 +49,10 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
-      - name: Run migrations
-        run: npx prisma migrate deploy
+      - name: Push schema to test database
+        run: npx prisma db push
+        # Uses the locally installed prisma version from package.json,
+        # not the global npx-fetched version, to avoid version mismatch.
 
       - name: Lint
         run: npm run lint
@@ -61,7 +63,7 @@ jobs:
   docker:
     needs: lint-and-build
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v4
 

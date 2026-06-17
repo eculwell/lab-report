@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { LabFormValues } from '@/types';
 
+const MAX_TITLE_LENGTH = 200;
+const MAX_NAME_LENGTH = 100;
+const MAX_CLASS_LENGTH = 100;
+const MAX_QUESTION_LENGTH = 1000;
+const MAX_QUESTIONS = 50;
+
 export async function GET() {
   try {
     const labs = await prisma.lab.findMany({
@@ -25,6 +31,22 @@ export async function POST(req: NextRequest) {
         { error: 'title, professorName, and className are required' },
         { status: 400 },
       );
+    }
+    if (title.length > MAX_TITLE_LENGTH)
+      return NextResponse.json({ error: 'Lab title is too long' }, { status: 400 });
+    if (professorName.length > MAX_NAME_LENGTH)
+      return NextResponse.json({ error: 'Professor name is too long' }, { status: 400 });
+    if (className.length > MAX_CLASS_LENGTH)
+      return NextResponse.json({ error: 'Class name is too long' }, { status: 400 });
+    if (!Array.isArray(questions) || questions.length === 0)
+      return NextResponse.json({ error: 'At least one question is required' }, { status: 400 });
+    if (questions.length > MAX_QUESTIONS)
+      return NextResponse.json({ error: `Maximum ${MAX_QUESTIONS} questions allowed` }, { status: 400 });
+    for (const q of questions) {
+      if (!q.text?.trim())
+        return NextResponse.json({ error: 'All questions must have text' }, { status: 400 });
+      if (q.text.length > MAX_QUESTION_LENGTH)
+        return NextResponse.json({ error: 'A question text is too long' }, { status: 400 });
     }
 
     const lab = await prisma.lab.create({
