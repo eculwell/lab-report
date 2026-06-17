@@ -1,6 +1,5 @@
 import { notFound } from 'next/navigation';
 import { prisma } from '@/lib/prisma';
-import { getPresignedUrl } from '@/lib/minio';
 import PrintClient from './PrintClient';
 
 interface Props {
@@ -20,17 +19,6 @@ export default async function PrintPage({ params }: Props) {
 
   if (!submission) notFound();
 
-  // Resolve presigned URLs for image answers (server-side so they're ready to print)
-  const answersWithUrls = await Promise.all(
-    submission.answers.map(async (answer) => {
-      if (answer.imageKey) {
-        const imageUrl = await getPresignedUrl(answer.imageKey);
-        return { ...answer, imageUrl };
-      }
-      return { ...answer, imageUrl: null };
-    }),
-  );
-
   const data = {
     id: submission.id,
     studentName: submission.studentName,
@@ -41,10 +29,14 @@ export default async function PrintPage({ params }: Props) {
       className: submission.lab.className,
       questions: submission.lab.questions,
     },
-    answers: answersWithUrls.map((a) => ({
+    // Use the proxy route instead of presigned MinIO URLs —
+    // the browser hits /api/images/... and the server fetches from MinIO.
+    answers: submission.answers.map((a) => ({
       questionId: a.questionId,
       textContent: a.textContent,
-      imageUrl: a.imageUrl,
+      // Build a proxy URL from the stored key, e.g.
+      // submissions/abc/qid.jpg → /api/images/submissions/abc/qid.jpg
+      imageUrl: a.imageKey ? `/api/images/${a.imageKey}` : null,
     })),
   };
 

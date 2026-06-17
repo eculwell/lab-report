@@ -47,7 +47,7 @@ export default function PrintClient({ data }: { data: PrintData }) {
         <div className="rounded-2xl border border-gray-200 bg-white p-8 shadow-sm print:rounded-none print:border-none print:shadow-none">
           {/* Header */}
           <div className="mb-8 border-b border-gray-100 pb-6">
-            <h1 className="text-2xl font-semibold text-gray-900">{data.lab.title}</h1>
+            <h1 className="text-2xl font-semibold text-gray-900 break-words">{data.lab.title}</h1>
             <p className="mt-1 text-sm text-gray-500">
               {data.lab.professorName}&nbsp;·&nbsp;{data.lab.className}
             </p>
