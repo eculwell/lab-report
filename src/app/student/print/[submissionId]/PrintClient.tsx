@@ -34,7 +34,7 @@ export default function PrintClient({ data }: { data: PrintData }) {
       <div className="mx-auto max-w-2xl px-4 print:max-w-none print:px-8">
         {/* Print action bar — hidden when printing */}
         <div className="mb-8 flex items-center justify-between print:hidden">
-          <p className="text-sm text-gray-500">Lab report ready</p>
+          <p className="text-sm text-gray-500">Preview lab report</p>
           <button
             onClick={() => window.print()}
             className="flex items-center gap-2 rounded-xl bg-gray-900 px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90"
@@ -55,7 +55,7 @@ export default function PrintClient({ data }: { data: PrintData }) {
               {data.studentName}
             </p>
             <p className="text-xs text-gray-400">
-              Submitted {new Date(data.createdAt).toLocaleDateString(undefined, {
+              {new Date(data.createdAt).toLocaleDateString(undefined, {
                 year: 'numeric',
                 month: 'long',
                 day: 'numeric',
