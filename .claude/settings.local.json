@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(node -e \"const { PrismaPg } = require\\('@prisma/adapter-pg'\\); console.log\\(Object.keys\\(require\\('@prisma/adapter-pg'\\)\\)\\)\")",
+      "Bash(node -e \"const { PrismaPg } = require\\('@prisma/adapter-pg'\\); const a = new PrismaPg\\({ connectionString: 'postgresql://x' }\\); console.log\\(typeof a, Object.getPrototypeOf\\(a\\).constructor.name\\)\")",
+      "Bash(npx next *)"
+    ]
+  }
+}
